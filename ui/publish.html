@@ -1,0 +1,146 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <title>Quick publish</title>
+  <link rel="stylesheet" href="styles.css" />
+  <style>
+    .titlebar { height: 38px; }
+    .wrap { padding: 14px 18px 16px; display: grid; gap: 12px; height: calc(100% - 38px); grid-template-rows: auto auto 1fr auto auto; }
+    .toprow { display: grid; grid-template-columns: 1fr 1.4fr; gap: 10px; }
+    textarea { min-height: 0; height: 100%; resize: none; font-size: 14px; }
+    .prio-seg { justify-self: start; }
+    .prio-seg button.on[data-v="5"] { background: color-mix(in srgb, var(--p5) 35%, transparent); }
+    .prio-seg button.on[data-v="4"] { background: color-mix(in srgb, var(--p4) 30%, transparent); }
+    .more { display: none; grid-template-columns: 1fr 1fr 110px; gap: 10px; }
+    .more.open { display: grid; }
+    .foot { display: flex; align-items: center; gap: 10px; }
+    .foot .grow { flex: 1; }
+    .foot small { color: var(--faint); font-size: 12px; }
+    .linkbtn { background: none; border: 0; color: var(--muted); cursor: pointer; font-size: 12.5px; padding: 4px 0; }
+    .linkbtn:hover { color: var(--text); }
+    .md { display: flex; align-items: center; gap: 6px; font-size: 12.5px; color: var(--muted); }
+  </style>
+</head>
+<body>
+  <header class="titlebar" data-tauri-drag-region>
+    <img class="logo" src="icon.png" alt="" />
+    <span class="name">Quick publish</span>
+    <div class="grow" data-tauri-drag-region></div>
+    <div class="winbtns">
+      <button id="close" class="close" title="Close (Esc)" aria-label="Close"><svg viewBox="0 0 10 10"><path d="M0 0l10 10M10 0L0 10" stroke="currentColor" stroke-width="1.1"/></svg></button>
+    </div>
+  </header>
+  <div class="wrap">
+    <div class="toprow">
+      <select id="topic" aria-label="Topic"></select>
+      <input type="text" id="title" placeholder="Title (optional)" />
+    </div>
+    <div class="seg prio-seg" id="prio" aria-label="Priority">
+      <button data-v="1">Min</button><button data-v="2">Low</button><button data-v="3" class="on">Default</button><button data-v="4">High</button><button data-v="5">Urgent</button>
+    </div>
+    <textarea id="message" placeholder="Message" aria-label="Message"></textarea>
+    <div class="more" id="more">
+      <input type="text" id="tags" placeholder="Tags: warning, backup" spellcheck="false" />
+      <input type="text" id="click" placeholder="Link to open on click" spellcheck="false" />
+      <input type="text" id="delay" placeholder="Delay: 30m" spellcheck="false" />
+    </div>
+    <div class="foot">
+      <button class="linkbtn" id="toggle-more">More options</button>
+      <label class="md"><input type="checkbox" id="markdown" /> Markdown</label>
+      <span class="grow"></span>
+      <small>Ctrl + Enter</small>
+      <button class="btn primary" id="send">Send</button>
+    </div>
+  </div>
+  <div class="snack" id="snack" role="status"></div>
+  <script src="common.js"></script>
+  <script>
+    let cfg = null;
+    let prio = 3;
+
+    async function load() {
+      const st = await invoke("get_state");
+      cfg = st.config;
+      applyAppearance(cfg.general);
+      const sel = $("#topic");
+      const keep = sel.value;
+      sel.innerHTML = cfg.subscriptions.length
+        ? cfg.subscriptions.map((s) => {
+            const srv = cfg.servers.find((x) => x.id === s.server_id);
+            const label = s.display_name?.trim() ? `${s.display_name} (${s.topic})` : s.topic;
+            return `<option value="${s.id}">${esc(label)}${cfg.servers.length > 1 ? " — " + esc(srv?.name ?? "") : ""}</option>`;
+          }).join("")
+        : `<option value="">Subscribe to a topic first</option>`;
+      const want = keep || cfg.general.default_publish_sub;
+      if (want && cfg.subscriptions.some((s) => s.id === want)) sel.value = want;
+      $("#message").focus();
+    }
+
+    $("#prio").addEventListener("click", (e) => {
+      const b = e.target.closest("button");
+      if (!b) return;
+      prio = +b.dataset.v;
+      $$("#prio button").forEach((x) => x.classList.toggle("on", x === b));
+    });
+    $("#toggle-more").onclick = () => {
+      const open = $("#more").classList.toggle("open");
+      $("#toggle-more").textContent = open ? "Fewer options" : "More options";
+    };
+
+    function reset() {
+      $("#message").value = "";
+      $("#title").value = "";
+      $("#tags").value = "";
+      $("#click").value = "";
+      $("#delay").value = "";
+      prio = 3;
+      $$("#prio button").forEach((x) => x.classList.toggle("on", x.dataset.v === "3"));
+    }
+
+    async function send() {
+      const subId = $("#topic").value;
+      const message = $("#message").value;
+      if (!subId) return snack("Subscribe to a topic in the main window first", true);
+      if (!message.trim()) return snack("Write a message first", true);
+      const btn = $("#send");
+      btn.disabled = true;
+      try {
+        await invoke("publish", {
+          req: {
+            sub_id: subId,
+            message,
+            title: $("#title").value,
+            priority: prio,
+            tags: $("#tags").value.split(",").map((t) => t.trim()).filter(Boolean),
+            click: $("#click").value,
+            delay: $("#delay").value,
+            markdown: $("#markdown").checked,
+          },
+        });
+        if (cfg.general.default_publish_sub !== subId) {
+          cfg.general.default_publish_sub = subId;
+          invoke("save_general", { general: cfg.general }).catch(() => {});
+        }
+        snack($("#delay").value.trim() ? "Scheduled" : "Sent");
+        reset();
+        setTimeout(() => appWindow.hide(), 650);
+      } catch (err) {
+        snack(String(err), true);
+      }
+      btn.disabled = false;
+    }
+
+    $("#send").onclick = send;
+    $("#close").onclick = () => appWindow.hide();
+    document.addEventListener("keydown", (e) => {
+      if (e.key === "Escape") appWindow.hide();
+      if (e.key === "Enter" && (e.ctrlKey || e.metaKey)) { e.preventDefault(); send(); }
+    });
+    listen("publish-open", load);
+    listen("factory-reset", () => location.reload());
+    listen("general-changed", (g) => { if (cfg) { cfg.general = g; applyAppearance(g); } });
+    load();
+  </script>
+</body>
+</html>
