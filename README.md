@@ -1,4 +1,4 @@
-# ntfyar - A Windows 11 client for [ntfy](https://ntfy.sh)
+# ntfyar - A Windows client for [ntfy](https://ntfy.sh)
 
 It sits in the tray, shows native notifications, and keeps a searchable history.
 
