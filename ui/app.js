@@ -123,6 +123,7 @@ $("#nav").addEventListener("click", (e) => {
   }
   const b = e.target.closest("[data-nav]");
   if (!b) return;
+  if (onGeneralTab() && !okToLeave()) return;
   S.view = b.dataset.nav === "all" ? { kind: "all" } : { kind: "sub", subId: b.dataset.id };
   render();
 });
@@ -133,6 +134,10 @@ $("#nav-settings").addEventListener("click", () => {
 $("#conns").addEventListener("click", () => openSettings("servers"));
 $("#open-publish").addEventListener("click", () => invoke("open_publish"));
 $("#search").addEventListener("input", (e) => {
+  if (onGeneralTab() && !okToLeave()) {
+    e.target.value = "";
+    return;
+  }
   S.search = e.target.value;
   if (S.view.kind === "settings") S.view = { kind: "all" };
   renderMain();
@@ -331,7 +336,13 @@ function newSub() {
   };
 }
 
+function onGeneralTab() {
+  return S.view.kind === "settings" && S.tab === "general";
+}
+
 function openSettings(tab, opts = {}) {
+  if (onGeneralTab() && tab !== "general" && !okToLeave()) return;
+  if (tab === "general" && !onGeneralTab()) S.draft = null; // start from the saved settings
   S.view = { kind: "settings" };
   S.tab = tab;
   S.editServer = opts.server ?? null;
@@ -361,7 +372,7 @@ function switchHTML(id, checked) {
 
 function serversTab() {
   const ed = S.editServer;
-  let html = `<div class="section"><h2>Servers</h2><p class="hint">Your ntfy server’s address, the same one you use in the phone app.</p><div class="list">`;
+  let html = `<div class="section"><div class="list">`;
   for (const srv of S.cfg.servers) {
     const stObj = S.statuses[srv.id] ?? { state: "connecting" };
     const st = stObj.state;
@@ -431,9 +442,9 @@ function readServerForm() {
 
 function topicsTab() {
   if (!S.cfg.servers.length) {
-    return `<div class="section"><h2>Topics</h2><p class="hint">Add a server first.</p><button class="btn primary" data-tab="servers">Add server</button></div>`;
+    return `<div class="section"><p class="hint">Add a server first.</p><button class="btn primary" data-tab="servers">Add server</button></div>`;
   }
-  let html = `<div class="section"><h2>Topics</h2><p class="hint">Each topic you subscribe to gets its own notification rules. On servers where you log in, the topic list is synced with your ntfy account, so topics you add on the website or phone show up here too, and the other way round. Colours, names and rules stay on this PC.</p><div class="list">`;
+  let html = `<div class="section"><div class="list">`;
   for (const sub of S.cfg.subscriptions) {
     const rules = [];
     if (sub.muted) rules.push("muted");
@@ -481,7 +492,8 @@ function subForm(sub) {
 }
 
 function generalTab() {
-  const g = S.cfg.general;
+  if (!S.draft) S.draft = structuredClone(S.cfg.general);
+  const g = S.draft;
   const isMica = g.backdrop === "mica";
   const q = g.quiet_hours;
   return `
@@ -503,10 +515,9 @@ function generalTab() {
     <div class="card">
       <div class="toggle-row"><div class="txt">Start with Windows<small>Starts quietly in the tray.</small></div>${switchHTML("g-autostart", g.autostart)}</div>
       <div class="toggle-row"><div class="txt">Notify about missed messages<small>After sleep or a lost connection. More than three are bundled into one notification.</small></div>${switchHTML("g-missed", g.notify_missed)}</div>
-      <div class="two">
-        <div class="field"><label for="g-hotkey">Quick publish shortcut</label><input type="text" id="g-hotkey" class="hotkey" value="${esc(prettyHotkey(g.publish_hotkey))}" data-raw="${esc(g.publish_hotkey)}" readonly><span class="help">Click, then press the keys. Backspace clears it.</span></div>
-        <div class="field"><label for="g-limit">Messages to keep</label><input type="number" id="g-limit" min="50" max="20000" step="50" value="${g.history_limit}"></div>
-      </div>
+      <div class="toggle-row"><div class="txt">Keyboard shortcut for quick publish<small>Opens the quick publish window from anywhere in Windows.</small></div>${switchHTML("g-hotkey-on", g.publish_hotkey_enabled)}</div>
+      <div class="field" id="g-hotkey-field" style="${g.publish_hotkey_enabled ? "" : "display:none"}"><label for="g-hotkey">Shortcut</label><input type="text" id="g-hotkey" class="hotkey" value="${esc(prettyHotkey(g.publish_hotkey))}" readonly><span class="help">Click the field, then press the keys you want.</span></div>
+      <div class="field"><label for="g-limit">Messages to keep</label><input type="number" id="g-limit" min="50" max="20000" step="50" value="${g.history_limit}"></div>
     </div>
   </div>
   <div class="section">
@@ -526,8 +537,12 @@ function generalTab() {
     <div class="btns"><button class="btn danger" data-reset>Reset ntfyar…</button></div>
   </div>
   <div class="section">
-    <div class="btns"><span class="result" id="g-result"></span><span class="grow"></span><button class="btn danger" data-quit>Quit ntfyar</button></div>
-    <p class="hint" style="margin-top:14px">ntfyar ${esc(S.version)}. Closing the window keeps it running in the tray.</p>
+    <p class="hint">ntfyar ${esc(S.version)}. Closing the window keeps it running in the tray. To quit, right-click the tray icon.</p>
+  </div>
+  <div class="savebar" id="g-savebar" hidden>
+    <span class="grow">You have unsaved changes</span>
+    <button class="btn btn-discard" data-discard>Discard changes</button>
+    <button class="btn btn-save" data-save-general>Save changes</button>
   </div>`;
 }
 
@@ -536,22 +551,48 @@ function prettyHotkey(raw) {
   return raw.replace("CommandOrControl", "Ctrl").replace(/\+/g, " + ");
 }
 
-let saveTimer;
-function saveGeneral(patch, immediate = false) {
-  Object.assign(S.cfg.general, patch);
+// Appearance & behaviour edits go into a draft until "Save changes".
+function isDirty() {
+  return !!S.draft && JSON.stringify(S.draft) !== JSON.stringify(S.cfg.general);
+}
+
+function setDraft(patch) {
+  Object.assign(S.draft, patch);
+  // accent colour previews right away; it's put back if the changes are discarded
+  applyAppearance({ ...S.cfg.general, accent: S.draft.accent });
+  const bar = $("#g-savebar");
+  if (bar) bar.hidden = !isDirty();
+}
+
+function discardDraft() {
+  S.draft = null;
   applyAppearance(S.cfg.general);
-  clearTimeout(saveTimer);
-  saveTimer = setTimeout(async () => {
-    try {
-      await invoke("save_general", { general: S.cfg.general });
-      const r = $("#g-result");
-      if (r) { r.className = "result ok"; r.textContent = "Saved"; setTimeout(() => (r.textContent = ""), 1500); }
-    } catch (err) {
-      snack(String(err), true);
-      await loadState();
-      if (S.view.kind === "settings") renderSettings();
-    }
-  }, immediate ? 0 : 350);
+}
+
+async function saveDraft() {
+  const btn = $("[data-save-general]");
+  if (btn) btn.disabled = true;
+  try {
+    await invoke("save_general", { general: S.draft });
+    S.cfg.general = structuredClone(S.draft);
+    applyAppearance(S.cfg.general);
+    $("#g-savebar").hidden = true;
+    snack("Settings saved");
+  } catch (err) {
+    snack(String(err), true);
+  }
+  if (btn) btn.disabled = false;
+}
+
+/** Before leaving the settings page: ask if there are unsaved changes. */
+function okToLeave() {
+  if (!isDirty()) {
+    S.draft = null;
+    return true;
+  }
+  if (!confirm("You have unsaved changes in Appearance & behaviour. Discard them?")) return false;
+  discardDraft();
+  return true;
 }
 
 function bindSettings() {
@@ -563,7 +604,6 @@ function bindSettings() {
   $("[data-new-server]", root)?.addEventListener("click", () => openSettings("servers", { server: {} }));
   $("[data-new-sub]", root)?.addEventListener("click", () => openSettings("topics", { sub: newSub() }));
   $$("[data-cancel]", root).forEach((b) => (b.onclick = () => openSettings(S.tab)));
-  $("[data-quit]", root)?.addEventListener("click", () => invoke("quit"));
   $("[data-reset]", root)?.addEventListener("click", async (e) => {
     const ok = confirm(
       "Reset ntfyar?\n\nThis permanently deletes all servers, saved logins, topics, messages and settings on this PC. It can’t be undone.\n\nYour ntfy server and account aren’t affected."
@@ -667,13 +707,29 @@ function bindSettings() {
   // general
   $("#g-mode")?.addEventListener("change", (e) => {
     const mica = e.detail === "mica";
-    saveGeneral({ backdrop: mica ? "mica" : "acrylic" }, true);
+    setDraft({ backdrop: mica ? "mica" : "acrylic" });
   });
-  bindSwatches($("#g-accent"), (c) => saveGeneral({ accent: c }));
-  $("#g-autostart")?.addEventListener("change", (e) => saveGeneral({ autostart: e.target.checked }, true));
-  $("#g-missed")?.addEventListener("change", (e) => saveGeneral({ notify_missed: e.target.checked }, true));
-  $("#g-limit")?.addEventListener("change", (e) => saveGeneral({ history_limit: Math.max(50, +e.target.value || 2000) }, true));
-  const quiet = () => saveGeneral({
+  bindSwatches($("#g-accent"), (c) => setDraft({ accent: c }));
+  $("#g-autostart")?.addEventListener("change", (e) => setDraft({ autostart: e.target.checked }));
+  $("#g-missed")?.addEventListener("change", (e) => setDraft({ notify_missed: e.target.checked }));
+  $("#g-limit")?.addEventListener("input", (e) => setDraft({ history_limit: Math.max(50, +e.target.value || 2000) }));
+  $("#g-hotkey-on")?.addEventListener("change", (e) => {
+    const on = e.target.checked;
+    // switching it on with no shortcut set falls back to the default Ctrl + Alt + N
+    const patch = { publish_hotkey_enabled: on };
+    if (on && !S.draft.publish_hotkey) {
+      patch.publish_hotkey = "CommandOrControl+Alt+N";
+      $("#g-hotkey").value = prettyHotkey(patch.publish_hotkey);
+    }
+    $("#g-hotkey-field").style.display = on ? "" : "none";
+    setDraft(patch);
+  });
+  $("[data-save-general]", root)?.addEventListener("click", saveDraft);
+  $("[data-discard]", root)?.addEventListener("click", () => {
+    discardDraft();
+    renderSettings();
+  });
+  const quiet = () => setDraft({
     quiet_hours: { enabled: $("#g-quiet").checked, start: $("#g-qstart").value || "22:00", end: $("#g-qend").value || "07:00", allow_urgent: $("#g-urgent").checked },
   }, true);
   ["#g-quiet", "#g-qstart", "#g-qend", "#g-urgent"].forEach((s) => $(s)?.addEventListener("change", quiet));
@@ -681,9 +737,6 @@ function bindSettings() {
   const hk = $("#g-hotkey");
   hk?.addEventListener("keydown", (e) => {
     e.preventDefault();
-    if (e.key === "Backspace" || e.key === "Delete") {
-      hk.value = "None"; return saveGeneral({ publish_hotkey: "" }, true);
-    }
     if (["Control", "Alt", "Shift", "Meta"].includes(e.key)) return;
     let key = e.code.replace(/^Key/, "").replace(/^Digit/, "");
     if (e.code === "Space") key = "Space";
@@ -696,7 +749,7 @@ function bindSettings() {
     if (!mods.length && !/^F\d/.test(key)) return snack("Use at least one of Ctrl, Alt or Shift", true);
     const raw = [...mods, key].join("+");
     hk.value = prettyHotkey(raw);
-    saveGeneral({ publish_hotkey: raw }, true);
+    setDraft({ publish_hotkey: raw });
   });
 }
 
@@ -855,6 +908,7 @@ function bindContextMenus() {
 }
 
 function focusMessage(id) {
+  if (onGeneralTab() && !okToLeave()) return;
   S.view = { kind: "all" };
   S.search = ""; S.prio = 0; S.unreadOnly = false; S.showDismissed = false;
   $("#search").value = "";
@@ -892,7 +946,12 @@ document.addEventListener("keydown", (e) => {
   listen("history-changed", async () => { await loadHistory(); queueRender(true); });
   listen("status", (st) => { S.statuses = st; renderNav(); });
   listen("paused", (p) => { S.paused = p; if (S.view.kind !== "settings") queueRender(true); });
-  listen("general-changed", (g) => { S.cfg.general = g; applyAppearance(g); });
+  listen("general-changed", (g) => {
+    S.cfg.general = g;
+    // the publish window only changes the remembered topic; keep any unsaved edits here
+    if (S.draft) S.draft.default_publish_sub = g.default_publish_sub;
+    applyAppearance(S.draft ? { ...g, accent: S.draft.accent } : g);
+  });
   listen("focus-message", (id) => focusMessage(id));
   // after a reset, start over with a clean page
   listen("factory-reset", () => location.reload());

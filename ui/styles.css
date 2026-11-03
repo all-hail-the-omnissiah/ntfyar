@@ -319,6 +319,21 @@ textarea { resize: vertical; min-height: 70px; line-height: 1.45; }
 .btn.danger:hover { background: color-mix(in srgb, var(--p5) 15%, transparent); }
 .btn[disabled] { opacity: .55; cursor: progress; }
 .result { font-size: 13px; }
+
+/* unsaved-changes bar at the bottom of Appearance & behaviour */
+.savebar {
+  position: sticky; bottom: 14px; z-index: 5; max-width: 720px; margin-top: 22px;
+  display: flex; align-items: center; gap: 10px;
+  padding: 10px 12px 10px 18px; border-radius: 12px;
+  background: rgba(24, 26, 38, .97); border: 1px solid rgba(255,255,255,.12);
+  box-shadow: 0 10px 30px rgba(0,0,0,.45); font-size: 13.5px;
+}
+.savebar[hidden] { display: none; }
+.savebar .grow { flex: 1; color: var(--muted); }
+.btn.btn-save { background: #3fb950; border-color: transparent; color: #06130a; font-weight: 600; }
+.btn.btn-save:hover { background: #4fcb61; }
+.btn.btn-discard { background: #e5484d; border-color: transparent; color: #fff; font-weight: 600; }
+.btn.btn-discard:hover { background: #ef5a5f; }
 .result.ok { color: var(--ok); }
 .result.err { color: var(--p5); }
 

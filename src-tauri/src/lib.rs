@@ -592,7 +592,7 @@ async fn factory_reset(app: AppHandle) -> Result<(), String> {
     let _ = std::fs::remove_dir_all(&st.cache_dir);
 
     let general = General::default();
-    if let Err(e) = register_hotkey(&app, &general.publish_hotkey) {
+    if let Err(e) = register_hotkey(&app, general.active_hotkey()) {
         log::warn!("{e}");
     }
     apply_autostart(&app, general.autostart);
@@ -919,9 +919,9 @@ fn delete_subscription(app: AppHandle, id: String, purge: bool) -> Result<(), St
 async fn save_general(app: AppHandle, general: General) -> Result<(), String> {
     let st = app.state::<AppState>();
     let old = st.config.lock().unwrap().general.clone();
-    if general.publish_hotkey != old.publish_hotkey {
-        if let Err(e) = register_hotkey(&app, &general.publish_hotkey) {
-            let _ = register_hotkey(&app, &old.publish_hotkey);
+    if general.active_hotkey() != old.active_hotkey() {
+        if let Err(e) = register_hotkey(&app, general.active_hotkey()) {
+            let _ = register_hotkey(&app, old.active_hotkey());
             return Err(e);
         }
     }
@@ -1045,7 +1045,7 @@ pub fn run() {
             });
 
             build_tray(&handle)?;
-            if let Err(e) = register_hotkey(&handle, &general.publish_hotkey) {
+            if let Err(e) = register_hotkey(&handle, general.active_hotkey()) {
                 log::warn!("{e}");
             }
             apply_autostart(&handle, general.autostart);

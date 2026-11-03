@@ -132,6 +132,8 @@ pub struct General {
     pub autostart: bool,
     /// Global shortcut that opens the quick-publish window, e.g. "CommandOrControl+Alt+N".
     pub publish_hotkey: String,
+    /// The quick publish shortcut can be switched off without forgetting the key combination.
+    pub publish_hotkey_enabled: bool,
     pub quiet_hours: QuietHours,
     /// Show notifications for messages fetched while the app was offline.
     pub notify_missed: bool,
@@ -139,6 +141,17 @@ pub struct General {
     pub history_limit: usize,
     /// Topic used by default in quick publish (subscription id).
     pub default_publish_sub: String,
+}
+
+impl General {
+    /// The shortcut that should actually be registered ("" = none).
+    pub fn active_hotkey(&self) -> &str {
+        if self.publish_hotkey_enabled {
+            self.publish_hotkey.trim()
+        } else {
+            ""
+        }
+    }
 }
 
 impl Default for General {
@@ -149,6 +162,7 @@ impl Default for General {
             opacity: 80,
             autostart: true,
             publish_hotkey: "CommandOrControl+Alt+N".into(),
+            publish_hotkey_enabled: true,
             quiet_hours: QuietHours::default(),
             notify_missed: true,
             history_limit: 2000,

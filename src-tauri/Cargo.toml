@@ -1,6 +1,6 @@
 [package]
 name = "ntfyar"
-version = "0.1.0"
+version = "0.2.0"
 description = "Desktop client for ntfy"
 edition = "2021"
 

@@ -96,7 +96,6 @@ pub fn from_message(sub: &Subscription, m: &StoredMessage, image: Option<PathBuf
 
 #[cfg(windows)]
 pub fn show(app: &AppHandle, n: Notif) {
-    use tauri::Manager;
     use tauri_winrt_notification::{Duration, LoopableSound, Scenario, Sound, Toast};
 
     // Installed builds register the bundle identifier as the AppUserModelID.
